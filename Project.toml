@@ -1,0 +1,13 @@
+name = "SINDy"
+uuid = "af1e4fd6-1502-4bc5-8922-3d5ff4ab0da8"
+authors = ["Nic Rummel"]
+version = "1.0.0-DEV"
+
+[compat]
+julia = "1"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
