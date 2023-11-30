@@ -1,4 +1,3 @@
-using LinearAlgebra, Logging, Printf
 """
     Approximate the eigen value
     IN: 
@@ -117,7 +116,9 @@ end
         yk: (A - b*I)^-1 * zkm1
 """
 function powerMethod(
-    A::AbstractMatrix{T}; 
+    A::AbstractMatrix{T},
+    At::AbstractMatrix{T}; 
+    x0::Union{AbstractVector{T},Nothing}=nothing,
     maxIter::Int=100, 
     tol::Real=1e-12, 
     b::Real=0.0,
@@ -126,7 +127,7 @@ function powerMethod(
     ll::Logging.LogLevel=Logging.Warn,
     retVec::Bool=false,
     decomp::Function=lu
-) where T 
+) where T<:Real 
     with_logger(ConsoleLogger(stderr, ll)) do
         n, m  = size(A)
         @assert n == m "A is not square"
@@ -136,7 +137,7 @@ function powerMethod(
 
         # check if matrix is normal
         normal = false
-        AAt = A*A'
+        AAt = A*At
         if norm(AAt - A'*A) / norm(AAt) < eps() 
             normal = true 
         end
@@ -161,7 +162,7 @@ function powerMethod(
 
         # preallocate
         errEst = zeros(maxIter)
-        ykm1 = rand(n)
+        ykm1 = isnothing(x0) ? rand(n) : x0
         zkm1 = ykm1 / norm(ykm1)
         yk = zeros(n)
         zk = zeros(n)
