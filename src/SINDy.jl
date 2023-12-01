@@ -13,32 +13,21 @@ include("finiteDifferences.jl")
         Lib - Library
         u - data array
     OUT: 
-        spatial and temporal derivative libraries
+        G - Matrix where each column is a library function applied to the data
+        b - RHS eie du/dt 
+        names - vector of strings so we can identify the columns of G 
 """
-function buildLinearSystem(Lib, u)
+function buildLinearSystem(Lib::AbstractVector{NamedTuple}, u::AbstractArray{T}) where T<:Real
     N = length(Lib)
-    # M = prod(size(u).-4)
-    G = nothing 
+    M = prod(size(u))
+    G = Matrix{T}(undef, M, N)
     names = Vector{String}(undef, N)
     for (ix, (name, fun)) in enumerate(Lib)
         names[ix] = name
-        gi = nothing 
-        # @info "ix = $ix"
-        try
-            gi = fun(u)[:]
-            # @info "sz = $(length(gi))"
-        catch 
-            # @warn "here"
-            gi = fun.(u)[:]
-        end
-        if isnothing(G)
-            M = length(gi)
-            G = Matrix{Real}(undef, M, N)
-        end
-        G[:,ix] = gi
+        G[:,ix] = fun(u)[:]
     end
     sz = size(u)
-    pattern = length(sz) == 1 ? "Dt:1:p1" : "Dt:"* prod("Dx$i:0" for i = 1:length(size(u)))*":p1"
+    pattern = length(sz) == 1 ? "Dt:1:p1" : "Dt:1:"* prod("Dx$i:0" for i = 1:length(size(u))-1)*":p1"
     ix = findfirst(names .== pattern)
     y = G[:,ix]
     G = G[:,setdiff(1:N, ix)]
@@ -66,7 +55,19 @@ function getFunctionLib(P::Int,Q::Int)::AbstractVector{NamedTuple}
     end
     return FunLib
 end
+"""
+    getFunctionLib: obtain a vector of function in you library 
 
+    IN: 
+        alpha - Vector or scalar of derivative order [t, x1, x2, ..., xd] 
+        N - number of points in grid [Nt, Nx1, Nx2, Nx3, ..., Nx4]
+        h - grid spacing [ht, hx1, hx2, hx3, ..., hx4]
+        P::Int - Highest order of polynomials
+        Q::Int - Highest order of trig functions
+    OUT: 
+        FunLib::AbstractVector{NamedTuple} - Function library combinations of 
+            linear differential operators applied to non linear functions of the data
+"""
 function buildLib(alpha::Union{AbstractVector{Int},Int}, N::Union{AbstractVector{Int},Int}, h::Union{AbstractVector{<:Real},Real}, P::Int,Q::Int)
     DevLib = SINDy.getDevLibs(alpha, N, h)
     FunLib = SINDy.getFunctionLib(P,Q)
@@ -76,41 +77,13 @@ function buildLib(alpha::Union{AbstractVector{Int},Int}, N::Union{AbstractVector
         for (funName, fun) in FunLib
             ix +=1
             Lib[ix] = (
-                name=devName*":"*funName,
-                fun=u->dev(fun(u))
+                name=devName*funName,
+                fun=uu->dev(fun(uu))
             )
         end 
     end 
     return Lib
 end
 
-
-function solveWithLasso(G, y, λ)
-    A = copy(G) 
-    N = size(G,2)
-    scales = zeros(N)
-    for i in 1:N
-        scales[i] = std(A[:,i])
-        A[:,i] = (A[:,i] .- mean(A[:,i])) / scales[i]
-    end
-    b = copy(y)
-    x = Convex.Variable(N)
-    x.value = A'*b
-    obj = minimize(norm(A*x-b) + λ*norm(x,1) )
-    solve!(obj,SCS.Optimizer; silent_solver = true)
-    wbias = evaluate(x) 
-    nzIx = findall(abs.(wbias) .> 1e-5)
-    # Could use CG or if small enough direct method... 
-    x = Convex.Variable(length(nzIx))
-    obj = minimize(norm(A[:,nzIx]*x-b) )
-    solve!(obj,SCS.Optimizer; silent_solver = true)
-    alpha = evaluate(x)
-    wcvx = zeros(N)
-    for (i,ix) in enumerate(nzIx)
-        wcvx[ix] = alpha[i] 
-    end
-    wcvx ./= scales
-    return wcvx
-end
 end #module 
 

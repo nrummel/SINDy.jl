@@ -37,9 +37,11 @@ end
 function fval(fcnHist::FcnHist, crit::AnyOrAll)
     return min(fcnHist.relErr,fcnHist.absErr,fcnHist.gradNorm)
 end
-function summary(fcnHist::FcnHist)
+function summary(fcnHist::FcnHist, crit::StoppingCriterion, tol::Real)
     """
         Summary of Gradient Descent:
+        stopping criterion = $(typeof(crit))
+        tolerance          = $(tol)
         k                  = $(fcnHist.k)
         iterTime           = $(fcnHist.iterTime)
         |xk - xkm1| / |xk| = $(fcnHist.relErr)
@@ -64,7 +66,7 @@ struct CustomStep<:StepMethod
     stepFun::Function
 end
 function step(method::CustomStep, x::AbstractVector, p::AbstractVector, prox::Function)
-    return prox(stepFun(x, p), 0)
+    return prox(method.stepFun(x, p), 0)
 end 
 struct ArmilloStep<:StepMethod
 end
@@ -105,11 +107,11 @@ function gradientDescent(
             # print debug information periodically if desired
             (debugFreq > 0 && mod(k-1, debugFreq) == 0 ) && (@info debugStr(fcnHist[k]))
             if fval(fcnHist[k],crit) < tol 
-                @info summary(fcnHist[k])
+                @info summary(fcnHist[k], crit, tol)
                 return xk, fcnHist[1:k]
             end
-            # z = step(stepMethod, xkm1, gk, prox)
-            z = xkm1 + stepMethod.L * gk
+            z = step(stepMethod, xkm1, gk, prox)
+            # z = xkm1 + stepMethod.L * gk
             absErr = norm(z - xkm1) 
             if accel 
                 kk += 1
@@ -123,7 +125,7 @@ function gradientDescent(
             end
             iterTime = (time_ns() - start)*1e-9
         end
-        @warn "SD: Max iter ($maxIter) reached without convergence, relErr = $(fcnHist[end].relErr) > tol = $tol"
+        @warn "SD: Max iter ($maxIter) reached without convergence, $(fval(fcnHist[end],crit)) < tol = $tol"
         return xk, fcnHist
     end
 end
@@ -157,4 +159,60 @@ function lassoSolver(
                     prox=soft_thresh, prox_obj=prox_fcn,
                     accel=true, 
                     kwargs...)
+end
+
+function solveWithLasso(G, y, λ)
+    A = copy(G) 
+    N = size(G,2)
+    scales = zeros(N)
+    for i in 1:N
+        scales[i] = std(A[:,i])
+        A[:,i] = (A[:,i] .- mean(A[:,i])) / scales[i]
+    end
+    b = copy(y)
+    x = Convex.Variable(N)
+    x.value = A'*b
+    obj = minimize(norm(A*x-b) + λ*norm(x,1) )
+    solve!(obj,SCS.Optimizer; silent_solver = true)
+    wbias = evaluate(x) 
+    nzIx = findall(abs.(wbias) .> 1e-5)
+    # Could use CG or if small enough direct method... 
+    x = Convex.Variable(length(nzIx))
+    obj = minimize(norm(A[:,nzIx]*x-b) )
+    solve!(obj,SCS.Optimizer; silent_solver = true)
+    alpha = evaluate(x)
+    wcvx = zeros(N)
+    for (i,ix) in enumerate(nzIx)
+        wcvx[ix] = alpha[i] 
+    end
+    wcvx ./= scales
+    return wcvx
+end
+##
+function MatchingPursuit(G,y, maxNz = 3 )
+    N= size(G,2)
+    IX = Int[]
+    beta_star = nothing 
+    for k = 1:maxNz
+        left_over_ix = setdiff(1:N, IX)
+        T = eltype(y)
+        beta = Vector{Vector{T}}(undef, length(left_over_ix))
+        scores = zeros(length(left_over_ix))
+        for (i,n) = enumerate(left_over_ix)
+            this_ix = vcat(IX, [n])
+            beta[i] = ((G[:,this_ix]'*G[:,this_ix]) \ (G[:,this_ix]' * y ))
+            scores[i] = norm(G[:,this_ix] * beta[i] - y)
+        end 
+        val, ix = findmin(abs.(scores))
+        push!(IX, left_over_ix[ix])
+        beta_star = zeros(N)
+        beta_star[IX] = beta[ix]
+        # @info """
+        #     Number of Nz $k: 
+        #         Obj Val     : $(scores[ix])
+        #         Coeff Names : $(names_approx[IX])
+        #         β           : $(round.(beta_star',sigdigits=3))
+        # """
+    end
+    return beta_star
 end
