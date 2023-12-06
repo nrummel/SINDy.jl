@@ -1,170 +1,22 @@
-function D0(N::Int, ::Real)
-    D0(N)
-end
-function D0(N::Int)
-    M = N
-    II = 1:M
-    J = 1:M
-    vals = ones(M)
-    sparse(II,J,vals,N,N)#M,N)
-end
-function D1(N::Int,h::Real)
-    M = N-2
-    K = 2*M+6
-    I = zeros(Int,K)
-    J = zeros(Int,K)
-    val = zeros(K)
-    # # Left endpoint
-    I[1:3] = [1,1,1]
-    J[1:3] = [1,2,3]
-    val[1:3] = 1/(2*h) * [-3, 4, -1]
-    # Right endpoint
-    I[end-2:end]= [N,N,N]
-    J[end-2:end]= [N,N-1,N-2]
-    val[end-2:end] = 1/(2*h) * [3,-4, 1]
-    for i = 1:M
-        startIx = (i-1)*2+4
-        ii = i+1
-        I[startIx:startIx+1] .= ii
-        J[startIx:startIx+1] = [ii-1, ii+1]#[i+1, i+3]
-        val[startIx:startIx+1] = 1/(2*h) * [-1,1]
-    end
-    sparse(I,J,val,N,N)#M,N)
-end
+abstract type DiffMethod end
+struct SparseImpl <: DiffMethod end 
+struct MatFreeImpl <: DiffMethod end 
 
-function D2(N::Int,h::Real)
-    M = N-2
-    K = 3*M+8
-    I = zeros(Int,K)
-    J = zeros(Int,K)
-    val = zeros(K)
-    # Left endpoint
-    I[1:4] .= 1
-    J[1:4] = 1:4
-    val[1:4] = 1/(h^2) * [2,-5,4,-1]
-    # Right endpoint
-    I[end-3:end] .= N
-    J[end-3:end] = N:-1:N-3
-    val[end-3:end] = 1/(h^2) * [2,-5,4,-1]
-    for i = 1:M
-        startIx = (i-1)*3+5
-        ii = i+1
-        I[startIx:startIx+2] .= ii
-        J[startIx:startIx+2] = [ii-1,ii,ii+1]#[i+1,i+2, i+3]
-        val[startIx:startIx+2] =  1/(h^2) * [1, -2, 1]
-    end
-    sparse(I,J,val,N,N)#M,N)
-end
-"""
-    Approximate Derivatives with finite difference methods
-
-    IN: 
-        N::Int     - number of data points
-        h::Real    - step size 
-        order::Int - highest order of derivatives
-    OUT: 
-        Operator that that acts on N x M matrices
-"""
-function D(N::Int, h::Real, order::Int)
-    if order == 0
-        return LinearAlgebra.I
-    elseif order == 1 
-        fwd =  1/ h * [-11/6, 3, -3/2, 1/3]	# 3rd order
-        # fwd = 1/ h * [3/2,-2, 1/2] # 2nd order
-        cnt = 1 / h * [-1/2, 0, 1/2]
+function getIx(h::Real, order::Int )
+    if order == 1 
+        fwd = 1/h * SA[-11/6, 3, -3/2, 1/3]
+        cnt = 1/h * SA[-1/2, 0, 1/2]
     elseif order == 2 
-        fwd = 1/h^2 * [35/12, -26/3, 19/2, -14/3, 11/12] # 3rd order
-        # fwd = 1/h^2 * [2,-5,4,-1] # 2nd order
-        cnt = 1/h^2 * [1, -2, 1]
+        fwd = 1/h^2 * SA[35/12, -26/3, 19/2, -14/3, 11/12]
+        cnt = 1/h^2 * SA[1, -2, 1]
     elseif order == 3 
-        fwd = 1/h^3 *[-17/4,71/4,-59/2,49/2,-41/4,7/4] # 3rd order
-        # fwd = 1/h^3 * [-5/2,9,-12,7,-3/2] # 2nd order  
-        cnt = 1/h^3 * [-1/2, 1, 0, -1, 1/2]
+        fwd = 1/h^3 * SA[-17/4,71/4,-59/2,49/2,-41/4,7/4]
+        cnt = 1/h^3 * SA[-1/2, 1, 0, -1, 1/2]
     else 
         @error "Not implemented for order $order"
     end
-    bwd = mod(order,2) == 0 ? fwd : -fwd
- 
-    I = Int[]
-    J = Int[]
-    val = Float64[]
-    bnd = Int(floor(length(cnt)/2))
-    for i = 1:N
-        if i <= bnd
-            k = length(fwd)
-            I = vcat(I, i*ones(k))
-            J = vcat(J, i:i+k-1)
-            val = vcat(val, fwd)
-        elseif N-bnd+1 <= i
-            k = length(bwd)
-            I = vcat(I, i*ones(k))
-            J = vcat(J, i:-1:i-k+1)
-            val = vcat(val, bwd)
-        else 
-            k = length(cnt)
-            k2 = Int(floor(k/2))
-            I = vcat(I, i*ones(k))
-            J = vcat(J, i-k2:i+k2)
-            val = vcat(val, cnt)
-        end
-    end
-    sparse(I,J,val,N,N)
-end
-
-function fwdIx(ix::CartesianIndex, fwd::AbstractVector, dim::Int) 
-    J = length(fwd)
-    k = ix[dim]
-    IX = Vector{typeof(ix)}(undef, J)
-    for (j,kk) in enumerate(k:k+J-1)
-        tmp = Any[Tuple(ix)...]
-        tmp[dim] = kk 
-        IX[j] = CartesianIndex(Tuple(tmp))
-    end
-    IX
-end
-function bwdIx(ix::CartesianIndex, bwd::AbstractVector, dim::Int) 
-    J = length(bwd)
-    k = ix[dim]
-    IX = Vector{typeof(ix)}(undef, J)
-    for (j,kk) in enumerate(k:-1:k-J+1)
-        tmp = Any[Tuple(ix)...]
-        tmp[dim] = kk 
-        IX[j] = CartesianIndex(Tuple(tmp))
-    end
-    IX
-end
-function cntIx(ix::CartesianIndex, cnt::AbstractVector, dim::Int) 
-    J = length(cnt)
-    k = ix[dim]
-    k2 =  Int(floor(J/2))
-    IX = Vector{typeof(ix)}(undef, J)
-    for (j,kk) in enumerate(k-k2:k+k2)
-        tmp = Any[Tuple(ix)...]
-        tmp[dim] = kk 
-        IX[j] = CartesianIndex(Tuple(tmp))
-    end
-    IX
-end
-
-
-
-function fwdIx(fwd::AbstractVector, dim::Int, N::Int) 
-    J = length(fwd) - 1
-    Rpre = [0:0  for _ in 1:dim-1]
-    Rpost = [0:0  for _ in dim+1:N]
-    CartesianIndices(Tuple([Rpre...,0:J, Rpost...]))
-end
-function bwdIx(bwd::AbstractVector, dim::Int,N::Int) 
-    J = length(bwd) - 1
-    Rpre = [0:0  for _ in 1:dim-1]
-    Rpost = [0:0  for _ in dim+1:N]
-    CartesianIndices(Tuple([Rpre...,0:-1:-J,Rpost...]))
-end
-function cntIx(cnt::AbstractVector, dim::Int,N::Int) 
-    J = Int(floor(length(cnt)/2)) 
-    Rpre = [0:0  for _ in 1:dim-1]
-    Rpost = [0:0  for _ in dim+1:N]
-    CartesianIndices(Tuple([Rpre...,-J:J,Rpost...]))
+    bwd = mod(order,2) == 0 ? fwd : -fwd 
+    return (fwd, cnt, bwd)
 end
 """
     Approximate Derivatives with finite difference methods
@@ -177,52 +29,97 @@ end
     OUT: 
         Operator that that acts on N x M matrices
 """
-function D(u::AbstractArray{T}, h::Real, order::Real, dim::Int=1) where T<:Real
-    du = similar(u)
-    _D!(du,u,h,order,dim)
-    du 
-end
-function _D!(du::AbstractArray{T}, u::AbstractArray{T}, h::Real, order::Real, dim::Int) where T<:Real
+function D(u::AbstractArray{T,N}, h::Real, order::Int, dim::Int=1; meth::DiffMethod=MatFreeImpl()) where {T<:Real,N}
     if order == 0
-        du[:] .= u[:]
-        return
-    elseif order == 1 
-        fwd =  1/ h * [-11/6, 3, -3/2, 1/3]	# 3rd order
-        # fwd = 1/ h * [3/2,-2, 1/2] # 2nd order
-        cnt = 1 / h * [-1/2, 0, 1/2]
-    elseif order == 2 
-        fwd = 1/h^2 * [35/12, -26/3, 19/2, -14/3, 11/12] # 3rd order
-        # fwd = 1/h^2 * [2,-5,4,-1] # 2nd order
-        cnt = 1/h^2 * [1, -2, 1]
-    elseif order == 3 
-        fwd = 1/h^3 *[-17/4,71/4,-59/2,49/2,-41/4,7/4] # 3rd order
-        # fwd = 1/h^3 * [-5/2,9,-12,7,-3/2] # 2nd order  
-        cnt = 1/h^3 * [-1/2, 1, 0, -1, 1/2]
-    else 
-        @error "Not implemented for order $order"
+        return u
     end
-
+    du = similar(u)
+    fwd, cnt, bwd = getIx(h,order)
     sz = size(u)
-    N = length(sz)
-    @assert all(size(du) .== sz)
+    D = sz[dim]
+    leftIx = CartesianIndices(ntuple(i->sz[i], Val(dim-1)))
+    rightIx = CartesianIndices(ntuple(i->sz[dim+i], Val(N-dim)))
+    if isa(meth, MatFreeImpl)
+        _D_matFree!(
+            du, u, 
+            D, cnt, fwd, bwd,
+            leftIx, rightIx
+        )
+    elseif isa(meth, SparseImpl)
+        _D_sparse!(
+            du, u, 
+            D, cnt, fwd, bwd,
+            leftIx, rightIx
+        )
+    else 
+        throw("Not Implemented")
+    end
+    return du
+end
 
-    bwd = mod(order,2) == 0 ? fwd : -fwd
-    fIx = fwdIx(fwd,dim,N)
-    bIx = bwdIx(bwd,dim,N)
-    cIx = cntIx(cnt,dim,N)
-    
-    bnd = Int(floor(length(cnt)/2))
-    for ix = CartesianIndices(u)
-        if ix[dim]  <= bnd
-            du[ix] = dot(u[ix .+ fIx], fwd)
-        elseif sz[dim]-bnd <= ix[dim] 
-            du[ix] = dot(u[ix .+ bIx], bwd)
-        else 
-            du[ix] = dot(u[ix .+ cIx], cnt)
+function _D_matFree!(
+    du::AbstractArray{T,N}, u::AbstractArray{T,N}, D::Int,
+    cnt::SVector{K,T}, fwd::SVector{J,T}, bwd::SVector{J,T},
+    leftIx::CartesianIndices, rightIx::CartesianIndices
+) where {T<:Real,N,J,K}
+    bnd = Int(floor(K/2))
+    @assert all(size(du) .== size(u)) "Input and output must be of the same size"
+
+    @inbounds for l in leftIx,r in rightIx
+        for i in 1:bnd 
+            ix = SVector(ntuple(x->i-1+x, Val(J)))
+            du[l,i,r] = dot(fwd, @view u[l,ix,r])
+        end
+        for i = bnd+1:D-bnd-1 
+            ix = SVector(ntuple(x->i-bnd+x-1, Val(K)))
+            du[l,i,r] = dot(cnt, @view u[l,ix,r])
+        end
+        for i = D-bnd:D 
+            ix = SVector(ntuple(x->i-x+1, Val(J)))
+            du[l,i,r] =dot(bwd, @view u[l,ix,r])
         end
     end
     nothing
 end
+function _D_sparse!(
+    du::AbstractArray{T,N}, u::AbstractArray{T,N}, D::Int,
+    cnt::SVector{K,T}, fwd::SVector{J,T}, bwd::SVector{J,T},
+    leftIx::CartesianIndices, rightIx::CartesianIndices
+) where {T<:Real,N,J,K}
+    # pre allocating here would help with speed
+    rowIx = Int[]
+    colIx = Int[]
+    nzVal = Float64[]
+    bnd = Int(floor(length(cnt)/2))
+    for i = 1:D
+        if i <= bnd
+            k = length(fwd)
+            append!(rowIx, i*ones(k))
+            append!(colIx, i:i+k-1)
+            append!(nzVal, fwd)
+        elseif D-bnd <= i 
+            k = length(bwd)
+            append!(rowIx, i*ones(k))
+            append!(colIx, i:-1:i-k+1)
+            append!(nzVal, bwd)
+        else 
+            k = length(cnt)
+            k2 = Int(floor(k/2))
+            append!(rowIx, i*ones(k))
+            append!(colIx, i-k2:i+k2)
+            append!(nzVal, cnt)
+        end
+    end
+    ## build the spars matrix 
+    DD = sparse(rowIx,colIx,nzVal,D,D)
+    ## Apply it 
+    for l in leftIx, r in rightIx
+        du[l,:,r] = DD * @view u[l,:,r]
+    end 
+end
+"""
+    Wrapper to help when we pass non arrays
+"""
 function getDevLibs(alpha::Int, N::Int, h::Real)
     getDevLibs([alpha], [N],[h])
 end

@@ -1,5 +1,5 @@
 using ProgressMeter, Distributions, PlotlyJS
-using SINDy, Convex, ECOS, SCS, Symbolics
+using SINDy, Symbolics
 
 """ Bernoulli's equation with constant coefficients
 U' = -p U + q U^2, U(0) = U0
@@ -23,7 +23,7 @@ function buildExactLib(alpha, P, p, q, u0)
             end
             Lib[ix] =(
                 name= "Dt:$(i-1):p$j",
-                fun=tmp
+                fun=tt->tmp.(tt)
             )
         end
     end
@@ -43,22 +43,23 @@ function genBernoulli(p::Real, q::Real, u0::Real;
     return tt, nt, h, u
 end
 ##
-function plotTestData(tt,u, U, title="") 
-    nt=length(tt)
+function plot1D(tt,u, U, title="") 
     plot(
         [
             scatter(
                 x=tt,
                 y=u,
-                name="approx"
+                name="Approximation"
             ),
             scatter(
                 x=tt,
                 y=U,
-                name="exact"
+                name="Exact"
             ),
         ],
-        Layout(title=title)
+        Layout(title=title,
+        yaxis_title="Absolute Error",
+        xaxis_title="time")
     )
 end
 function plotRelErr(tt,u, U) 
@@ -88,14 +89,15 @@ approxLib = SINDy.buildLib(alpha,nt,ht,P,Q)
 exactLib = buildExactLib(alpha,P,p,q,u0)
 G_approx,y_approx,names_approx = SINDy.buildLinearSystem(approxLib, u)
 G_exact,y_exact,names_exact = SINDy.buildLinearSystem(exactLib,tt)
-w_approx = SINDy.solveWithLasso(G_approx, y_approx, 0)
-w_exact = SINDy.solveWithLasso(G_exact, y_exact, 0)
+w_approx = SINDy.solveWithLasso(G_approx, y_approx, 2)
+w_exact = SINDy.solveWithLasso(G_exact, y_exact, 2)
 w_approx_mp = SINDy.MatchingPursuit(G_approx, y_approx, 2)
 w_exact_mp = SINDy.MatchingPursuit(G_exact, y_exact, 2)
 wstar = zeros(size(G_exact,2))
 wstar[1:2] = [-p, q]
 F_approx(w) = norm(G_approx*w-y_approx)
 F_exact(w) = norm(G_exact*w-y_exact)
+##
 @info "==================================================="
 @info "============= With Finite Difference =============="
 @info "==================================================="
@@ -114,3 +116,11 @@ F_exact(w) = norm(G_exact*w-y_exact)
 @info "obj best = $(F_exact(w_exact_mp))"
 @info "$(round.(wstar',sigdigits=2))"
 @info "obj truth = $(F_exact(wstar))"
+##
+
+plot1D(
+    tt, 
+    abs.(y_approx - G_approx*wstar),
+    abs.(y_approx- G_approx*w_approx_mp),
+    # title="Bernoulli"
+)

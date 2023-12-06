@@ -175,7 +175,7 @@ function solveWithLasso(G, y, λ)
     obj = minimize(norm(A*x-b) + λ*norm(x,1) )
     solve!(obj,SCS.Optimizer; silent_solver = true)
     wbias = evaluate(x) 
-    nzIx = findall(abs.(wbias) .> 1e-5)
+    nzIx = findall(abs.(wbias) .> 10.0^-λ)
     # Could use CG or if small enough direct method... 
     x = Convex.Variable(length(nzIx))
     obj = minimize(norm(A[:,nzIx]*x-b) )
@@ -190,6 +190,34 @@ function solveWithLasso(G, y, λ)
 end
 ##
 function MatchingPursuit(G,y, maxNz = 3 )
+    N= size(G,2)
+    IX = Int[]
+    beta_star = nothing 
+    for k = 1:maxNz
+        left_over_ix = setdiff(1:N, IX)
+        T = eltype(y)
+        beta = Vector{Vector{T}}(undef, length(left_over_ix))
+        scores = zeros(length(left_over_ix))
+        for (i,n) = enumerate(left_over_ix)
+            this_ix = vcat(IX, [n])
+            beta[i] = ((G[:,this_ix]'*G[:,this_ix]) \ (G[:,this_ix]' * y ))
+            scores[i] = norm(G[:,this_ix] * beta[i] - y)
+        end 
+        val, ix = findmin(abs.(scores))
+        push!(IX, left_over_ix[ix])
+        beta_star = zeros(N)
+        beta_star[IX] = beta[ix]
+        # @info """
+        #     Number of Nz $k: 
+        #         Obj Val     : $(scores[ix])
+        #         Coeff Names : $(names_approx[IX])
+        #         β           : $(round.(beta_star',sigdigits=3))
+        # """
+    end
+    return beta_star
+end
+##
+function OrthogonnalMatchingPursuit(G,y, maxNz = 3 )
     N= size(G,2)
     IX = Int[]
     beta_star = nothing 

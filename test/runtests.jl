@@ -1,10 +1,9 @@
-using SINDy,Test
+using Test
 using Convex, SCS, PlotlyJS
 using Statistics, LinearAlgebra, Logging
-## Test the finite difference methods
-# f = sin 
-# DD = D3
-# df =x-> -1*cos(x)
+using SINDy
+using SINDy: D
+
 function plot1D(xx,yy,YY,err)
     [
         plot(
@@ -15,7 +14,7 @@ function plot1D(xx,yy,YY,err)
         );
         plot(
             [
-                scatter(x=xx, y= h^2*ones(N), marker_color="black", line_dash="dash", name="h^2"),
+                scatter(x=xx, y= h^2*ones(length(err)), marker_color="black", line_dash="dash", name="h^2"),
                 scatter(x=xx, y= err, name="abs err")
             ],
             Layout(
@@ -95,9 +94,12 @@ end
 
 function testFiniteDifMethod(
     f::Function, df::Function, dev::Union{Function,AbstractMatrix,UniformScaling{Bool}}; 
-    h::AbstractVector{<:Real}=[0.1], xx::AbstractVector=[-10:0.1:10], 
+    h::Union{Real,AbstractVector{<:Real}}=[0.1], xx::AbstractVector=[-10:0.1:10], 
     thresh::Real=10*0.1^2, debug::Bool=false
 )
+    if !isa(h,Vector)
+        h = [h]
+    end
     DDD = length(h)
     N = length.(xx)
     IX = CartesianIndices(Tuple([1:n for n in N]))
@@ -115,7 +117,7 @@ function testFiniteDifMethod(
     end
     if debug
         if DDD == 1
-            display(plot1D(xx,yy,YY,err))
+            display(plot1D(xx[1],yy[:],YY[:],err[:]))
         elseif DDD == 2
             display(plot2D(xx[1],xx[2],yy,YY))
         end
@@ -193,69 +195,63 @@ function testGradDescent()
 end
 ##
 @testset "SINDy" begin
-@testset "Finite Differences 1D" begin
-    h = [0.1]
-    DDD = length(h)
-    N = zeros(Int,DDD)
-    xx = Vector(undef, DDD)
-    for (i,hi) in enumerate(h)
-        xx[i] = -10:hi:10
-        N[i] = length(xx[i])
+    @testset "Finite Differences 1D" begin
+        h = 0.1
+        xx = [-10:h:10]
+        ## Sparse operators
+        @test testFiniteDifMethod(sin, sin, 
+            u->D(u,h,0; meth=SINDy.SparseImpl()); 
+            h=h,xx=xx,thresh=10*h^2)
+        @test testFiniteDifMethod(sin, cos, 
+            u->D(u,h,1; meth=SINDy.SparseImpl()); 
+            h=h,xx=xx,thresh=10*h^2)
+        @test testFiniteDifMethod(sin, x->-sin(x), 
+            u->D(u,h,2; meth=SINDy.SparseImpl()); 
+            h=h,xx=xx,thresh=10*h^2)
+        @test testFiniteDifMethod(sin, x->-cos(x), 
+            u->D(u,h,3; meth=SINDy.SparseImpl()); 
+            h=h,xx=xx,thresh=10*h^2)
+        # Inplace / Matrix free
+        @test testFiniteDifMethod(sin, sin, 
+            u->D(u,h,0); 
+            h=h,xx=xx,thresh=10*h^2)
+        @test testFiniteDifMethod(sin, cos, 
+            u->D(u,h,1); 
+            h=h,xx=xx,thresh=10*h^2)
+        @test testFiniteDifMethod(sin, x->-sin(x), 
+            u->D(u,h,2); 
+            h=h,xx=xx,thresh=10*h^2)
+        @test testFiniteDifMethod(sin, x->-cos(x), 
+            u->D(u,h,3); 
+            h=h,xx=xx,thresh=10*h^2)
+        # @test testFISTA()
     end
-    ## Sparse operators
-    @test testFiniteDifMethod(sin, sin, 
-        u->SINDy.D(N[1],h[1],0)*u; 
-        h=h,xx=xx,thresh=10*h[1]^2)
-    @test testFiniteDifMethod(sin, cos, 
-        u->SINDy.D(N[1],h[1],1)*u; 
-        h=h,xx=xx,thresh=10*h[1]^2)
-    @test testFiniteDifMethod(sin, x->-sin(x), 
-        u->SINDy.D(N[1],h[1],2)*u; 
-        h=h,xx=xx,thresh=10*h[1]^2)
-    @test testFiniteDifMethod(sin, x->-cos(x), 
-        u->SINDy.D(N[1],h[1],3)*u; 
-        h=h,xx=xx,thresh=10*h[1]^2)
-    # Inplace / Matrix free
-    @test testFiniteDifMethod(sin, sin, 
-        u->SINDy.D(u,h[1],0); 
-        h=h,xx=xx,thresh=10*h[1]^2)
-    @test testFiniteDifMethod(sin, cos, 
-        u->SINDy.D(u,h[1],1); 
-        h=h,xx=xx,thresh=10*h[1]^2)
-    @test testFiniteDifMethod(sin, x->-sin(x), 
-        u->SINDy.D(u,h[1],2); 
-        h=h,xx=xx,thresh=10*h[1]^2)
-    @test testFiniteDifMethod(sin, x->-cos(x), 
-        u->SINDy.D(u,h[1],3); 
-        h=h,xx=xx,thresh=10*h[1]^2)
-    # @test testFISTA()
-end
-@testset "Finite Differences 2D" begin
-    U(t,x) = sin(x)*exp(-2*t)
-    Ux(t,x) = cos(x)*exp(-2*t)
-    Ut(t,x) = -2*sin(x)*exp(-2*t)
-    Utx(t,x) = -2*cos(x)*exp(-2*t)
+    @testset "Finite Differences 2D" begin
+        U(t,x) = sin(x)*exp(-2*t)
+        Ux(t,x) = cos(x)*exp(-2*t)
+        Ut(t,x) = -2*sin(x)*exp(-2*t)
+        Utx(t,x) = -2*cos(x)*exp(-2*t)
+        ##
+        ht = 0.1
+        hx = 0.01
+        tt = 0:ht:10
+        xx = -10:hx:10
+        Nt = length(tt)
+        Nx = length(xx)
+        ##
+        @test testFiniteDifMethod(U,Ut,
+            u->D(u,ht,1,1);
+            h=[ht,hx],xx=[tt,xx],thresh=10*ht^2)
+        @test testFiniteDifMethod(U,Ux,
+            u->D(u,hx,1,2);
+            h=[ht,hx],xx=[tt,xx],thresh=10*hx^2)
+        @test testFiniteDifMethod(U,Utx,
+            u->D(D(u,ht,1,2),hx,1,1);
+            h=[ht,hx],xx=[tt,xx],thresh=10*ht^2)
+    end
     ##
-    ht = 0.1
-    hx = 0.01
-    tt = 0:ht:10
-    xx = -10:hx:10
-    Nt = length(tt)
-    Nx = length(xx)
-    ##
-    @test testFiniteDifMethod(U,Ut,
-        u->SINDy.D(u,ht,1,1);
-        h=[ht,hx],xx=[tt,xx],thresh=10*ht^2)
-    @test testFiniteDifMethod(U,Ux,
-        u->SINDy.D(u,hx,1,2);
-        h=[ht,hx],xx=[tt,xx],thresh=10*hx^2)
-    @test testFiniteDifMethod(U,Utx,
-        u->SINDy.D(SINDy.D(u,ht,1,2),hx,1,1);
-        h=[ht,hx],xx=[tt,xx],thresh=10*ht^2)
-end
-##
-@testset "Test Optimization Problem" begin 
-    @test testGradDescent()
-    # @test testFISTA() # failing right now...
-end
+    @testset "Test Optimization Problem" begin 
+        @test testGradDescent()
+        # @test testFISTA() # failing right now...
+    end
 end

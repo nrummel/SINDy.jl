@@ -1,7 +1,7 @@
 module SINDy
 using SparseArrays, LinearAlgebra, Statistics
 using LinearAlgebra, Logging, Printf
-using Convex, SCS
+using Convex, SCS, StaticArrays
 ##
 include("optimizers.jl")
 include("finiteDifferences.jl")
